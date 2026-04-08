@@ -113,6 +113,14 @@ This distinction — between a screening instrument and a decision instrument �
 
 ---
 
+## Related project
+
+**Multi-Agent Risk Auditor** — when the screener flags a company as High risk, the next step is deep qualitative analysis of its annual report or regulatory filings. The [Multi-Agent Risk Auditor](https://github.com/drnsmith/multiagent-risk-auditor) runs six specialist agents in parallel across uploaded documents, extracting conduct, financial, regulatory, operational, political, and environmental risk signals with citation tracking and human escalation.
+
+The two projects form a complete risk assessment pipeline: quantitative screening identifies candidates for further scrutiny; qualitative document analysis provides the evidence base for regulatory judgement.
+
+**Roadmap:** Direct integration — a "Deep Audit" button in the screener that passes a flagged company's ticker and suggested query directly to the auditor.
+
 ## Author
 
 Dr Natalya Smith — [github.com/drnsmith](https://github.com/drnsmith) · [medium.com/@NeverOblivious](https://medium.com/@NeverOblivious)
