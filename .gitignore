@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+*.parquet
+*.csv
+data/raw/
+data/processed/
+vectorstore/
+.venv/
+models_saved/
