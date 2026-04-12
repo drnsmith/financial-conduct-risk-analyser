@@ -121,6 +121,3 @@ The two projects form a complete risk assessment pipeline: quantitative screenin
 
 **Roadmap:** Direct integration — a "Deep Audit" button in the screener that passes a flagged company's ticker and suggested query directly to the auditor.
 
-## Author
-
-Dr Natalya Smith — [github.com/drnsmith](https://github.com/drnsmith) · [medium.com/@NeverOblivious](https://medium.com/@NeverOblivious)
