@@ -35,12 +35,12 @@ ASX_TICKERS = [
 def screen_companies(
     tickers: list[str],
     exchange: str,
-    max_workers: int = 5
+    max_workers: int = 1
 ) -> pd.DataFrame:
     """Score a list of companies in parallel and return ranked DataFrame."""
     results = []
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    with ThreadPoolExecutor(max_workers=1) as executor:
         futures = {
             executor.submit(score_company, t, exchange): t
             for t in tickers
