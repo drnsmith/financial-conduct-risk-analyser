@@ -16,8 +16,133 @@ import yfinance as yf
 from dataclasses import dataclass
 from typing import Optional
 import logging
+import time
+import json
+import os
+from pathlib import Path
+from datetime import datetime, timedelta
 
 log = logging.getLogger(__name__)
+
+# ── CACHE SETTINGS ────────────────────────────────────────────
+CACHE_DIR = Path("/tmp/yfinance_cache")
+CACHE_EXPIRY_HOURS = 24
+RATE_LIMIT_DELAY = 1.5   # seconds between requests
+MAX_RETRIES = 3
+RETRY_BACKOFF = [2, 5, 10]  # seconds to wait on each retry
+
+
+def _cache_path(ticker: str) -> Path:
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    return CACHE_DIR / f"{ticker.replace('.', '_')}.json"
+
+
+def _cache_valid(path: Path) -> bool:
+    if not path.exists():
+        return False
+    modified = datetime.fromtimestamp(path.stat().st_mtime)
+    return datetime.now() - modified < timedelta(hours=CACHE_EXPIRY_HOURS)
+
+
+def _save_cache(ticker: str, data: dict) -> None:
+    try:
+        path = _cache_path(ticker)
+        # Convert DataFrames to JSON-serialisable dicts
+        serialisable = {}
+        for key, val in data.items():
+            if isinstance(val, pd.DataFrame):
+                serialisable[key] = val.to_json()
+            else:
+                serialisable[key] = val
+        with open(path, "w") as f:
+            json.dump(serialisable, f)
+    except Exception as e:
+        log.warning(f"Cache write failed for {ticker}: {e}")
+
+
+def _load_cache(ticker: str) -> Optional[dict]:
+    try:
+        path = _cache_path(ticker)
+        if not _cache_valid(path):
+            return None
+        with open(path, "r") as f:
+            raw = json.load(f)
+        # Reconstruct DataFrames
+        result = {}
+        for key, val in raw.items():
+            if key in ("income", "balance", "cashflow") and isinstance(val, str):
+                result[key] = pd.read_json(val)
+            else:
+                result[key] = val
+        log.info(f"Cache hit for {ticker}")
+        return result
+    except Exception as e:
+        log.warning(f"Cache read failed for {ticker}: {e}")
+        return None
+
+
+def fetch_financials(ticker: str) -> dict:
+    """
+    Pull financial statements from yfinance.
+    Uses local cache (24h expiry) and retry logic with backoff
+    to handle Yahoo Finance rate limiting.
+    """
+    # Check cache first
+    cached = _load_cache(ticker)
+    if cached is not None:
+        return cached
+
+    # Rate limit — pause before each live request
+    time.sleep(RATE_LIMIT_DELAY)
+
+    for attempt in range(MAX_RETRIES):
+        try:
+            t = yf.Ticker(ticker)
+            info     = t.info or {}
+            income   = t.financials
+            balance  = t.balance_sheet
+            cashflow = t.cashflow
+
+            data = {
+                "info":     info,
+                "income":   income,
+                "balance":  balance,
+                "cashflow": cashflow,
+            }
+
+            # Save to cache on success
+            _save_cache(ticker, data)
+            return data
+
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "Too Many Requests" in err_str:
+                wait = RETRY_BACKOFF[min(attempt, len(RETRY_BACKOFF) - 1)]
+                log.warning(
+                    f"Rate limit hit for {ticker} "
+                    f"(attempt {attempt + 1}/{MAX_RETRIES}). "
+                    f"Waiting {wait}s..."
+                )
+                time.sleep(wait)
+            else:
+                log.warning(f"Failed to fetch {ticker}: {e}")
+                return {}
+
+    log.warning(f"All retries exhausted for {ticker}. Returning empty.")
+    return {}
+
+
+def safe_get(df, row, col=0):
+    """Safely extract a value from a financial dataframe."""
+    try:
+        if df is None or df.empty:
+            return np.nan
+        if row not in df.index:
+            return np.nan
+        val = df.loc[row].iloc[col]
+        return float(val) if pd.notna(val) else np.nan
+    except Exception:
+        return np.nan
 
 
 @dataclass
@@ -35,38 +160,6 @@ class QuantitativeScores:
     risk_drivers: list
     validity_flags: list      # Valimetrica layer
     raw: dict                 # Raw financials for audit trail
-
-
-def fetch_financials(ticker: str) -> dict:
-    """Pull financial statements from yfinance."""
-    t = yf.Ticker(ticker)
-    try:
-        info        = t.info or {}
-        income      = t.financials
-        balance     = t.balance_sheet
-        cashflow    = t.cashflow
-        return {
-            "info":     info,
-            "income":   income,
-            "balance":  balance,
-            "cashflow": cashflow,
-        }
-    except Exception as e:
-        log.warning(f"Failed to fetch {ticker}: {e}")
-        return {}
-
-
-def safe_get(df, row, col=0):
-    """Safely extract a value from a financial dataframe."""
-    try:
-        if df is None or df.empty:
-            return np.nan
-        if row not in df.index:
-            return np.nan
-        val = df.loc[row].iloc[col]
-        return float(val) if pd.notna(val) else np.nan
-    except Exception:
-        return np.nan
 
 
 def altman_z(raw: dict) -> tuple[Optional[float], str, list]:
@@ -143,7 +236,6 @@ def beneish_m(raw: dict) -> tuple[Optional[float], str, list]:
     if bs is None or inc is None or bs.shape[1] < 2:
         return None, "Insufficient data", drivers
 
-    # Current year (col 0) and prior year (col 1)
     rev_t      = safe_get(inc, "Total Revenue", 0)
     rev_t1     = safe_get(inc, "Total Revenue", 1)
     cogs_t     = safe_get(inc, "Cost Of Revenue", 0)
@@ -248,20 +340,17 @@ def piotroski_f(raw: dict) -> tuple[Optional[int], str, list]:
     at_t     = safe_get(inc, "Total Revenue", 0) / (ta or 1)
     at_t1    = safe_get(inc, "Total Revenue", 1) / (safe_get(bs, "Total Assets", 1) or 1)
 
-    # Profitability
     if roa > 0:       score += 1; drivers.append("✓ Positive ROA")
     if cfo > 0:       score += 1; drivers.append("✓ Positive CFO")
     if roa > roa_t1:  score += 1; drivers.append("✓ Improving ROA")
     if ta != 0 and cfo/ta > roa: score += 1; drivers.append("✓ CFO > ROA (accrual quality)")
 
-    # Leverage & liquidity
     if not np.isnan(ltd_t) and not np.isnan(ltd_t1) and ltd_t < ltd_t1:
         score += 1; drivers.append("✓ Declining long-term debt")
     if cr_t > cr_t1:  score += 1; drivers.append("✓ Improving current ratio")
     if not np.isnan(shares_t) and not np.isnan(shares_t1) and shares_t <= shares_t1:
         score += 1; drivers.append("✓ No share dilution")
 
-    # Operating efficiency
     if gm_t > gm_t1:  score += 1; drivers.append("✓ Improving gross margin")
     if at_t > at_t1:  score += 1; drivers.append("✓ Improving asset turnover")
 
