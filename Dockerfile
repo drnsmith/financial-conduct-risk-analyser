@@ -3,6 +3,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
+RUN ls -la data/processed/ || echo "data/processed not found"
 EXPOSE 7860
 ENV PORT=7860
 CMD ["gunicorn", "dashboard.app:server", "--bind", "0.0.0.0:7860", "--timeout", "120"]
