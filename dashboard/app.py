@@ -63,7 +63,7 @@ AXIS = dict(gridcolor=BORDER, linecolor=BORDER, zerolinecolor=BORDER)
 # ── DATA ──────────────────────────────────────────────────────────────────────
 def load_screen_results() -> pd.DataFrame:
     path = DATA_PROC / "screen_results.parquet"
-    print(f"Checking path: {path}, exists: {path.exists()}")
+    print(f"CWD: {os.getcwd()}, Checking path: {path}, exists: {path.exists()}", flush=True)
     if path.exists():
         return pd.read_parquet(path)
     # Auto-run screener if no data
@@ -88,7 +88,7 @@ def load_screen_results() -> pd.DataFrame:
 
 def load_document_analysis() -> list:
     path = DATA_PROC / "document_analysis.json"
-    print(f"Checking path: {path}, exists: {path.exists()}")
+    print(f"CWD: {os.getcwd()}, Checking path: {path}, exists: {path.exists()}", flush=True)
     if path.exists():
         with open(path) as f:
             return json.load(f)
